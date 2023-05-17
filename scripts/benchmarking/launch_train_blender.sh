@@ -3,6 +3,7 @@
 vis="wandb"
 single=false
 data_dir="data/blender"
+output_dir="outputs"
 
 helpFunction_launch_train()
 {
@@ -10,16 +11,18 @@ helpFunction_launch_train()
    echo -e "\t-m name of config to benchmark (e.g. mipnerf, instant_ngp)"
    echo -e "\t-v <vis>: Visualization method. <vis> can be wandb or tensorboard. Default is $vis."
    echo -e "\t-d: Path to Blender dataset directory. Default is $data_dir."
+   echo -e "\t-o: Path to output directory used for saving all checkpoints and logging. Default is $output_dir."
    echo -e "\t-s: Launch a single training job per gpu."
    echo -e "\t<gpu_list> [OPTIONAL] list of space-separated gpu numbers to launch train on (e.g. 0 2 4 5)"
    exit 1 # Exit program after printing help
 }
 
-while getopts "m:v:d:s" opt; do
+while getopts "m:v:d:o:s" opt; do
     case "$opt" in
         m ) method_name="$OPTARG" ;;
         v ) vis="$OPTARG" ;;
         d ) data_dir="$OPTARG" ;;
+        o ) output_dir="$OPTARG" ;;
         s ) single=true ;;
         ? ) helpFunction ;; 
     esac
@@ -82,6 +85,7 @@ for dataset in "${DATASETS[@]}"; do
     export CUDA_VISIBLE_DEVICES="${GPU_IDX[$idx]}"
     ns-train "${method_name}" "${method_opts[@]}" \
              --data="$data_dir/${dataset}${trans_file}" \
+             --output-dir="$output_dir" \
              --experiment-name="blender_${dataset}_${tag}" \
              --relative-model-dir=nerfstudio_models/ \
              --steps-per-save=1000 \
@@ -101,4 +105,4 @@ echo "Done."
 echo "Launch eval with:"
 s=""
 $single && s="-s"
-echo "$(dirname "$0")/launch_eval_blender.sh -m $method_name -o outputs/ -t $timestamp $s"
+echo "$(dirname "$0")/launch_eval_blender.sh -m $method_name -o $output_dir/ -t $timestamp $s"
