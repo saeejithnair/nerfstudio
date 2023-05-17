@@ -4,7 +4,7 @@ We provide built-in performance profiling capabilities to make it easier for you
 
 #### In-house profiler
 
-You can use our built-in profiler. By default, it is enabled and will print at the termination of the program. You can disable it via CLI using the flag `--logging.no-enable-profiler`.
+You can use our built-in profiler. By default, it is enabled and will print at the termination of the program. You can disable it via CLI using the flag `--logging.profiler=none`.
 
 
 The profiler computes the average total time of execution for any function with the `@profiler.time_function` decorator.
@@ -71,7 +71,7 @@ To perform the profiling, you can either specify that you want to generate a fla
 
 - flame graph: with wandb logging and our inhouse logging disabled
     ```bash
-    program="ns-train nerfacto -- --vis=wandb --logging.no-enable-profiler blender-data"
+    program="ns-train nerfacto -- --vis=wandb --logging.profiler=none blender-data"
     py-spy record -o {PATH_TO_OUTPUT_SVG} $program
     ```
 - top-down stats: running same program configuration as above

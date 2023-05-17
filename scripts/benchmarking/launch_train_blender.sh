@@ -83,7 +83,7 @@ for dataset in "${DATASETS[@]}"; do
              --steps-per-save=1000 \
              --max-num-iterations=16500 \
              --logging.local-writer.enable=False  \
-             --logging.enable-profiler=False \
+             --logging.profiler=none \
              --vis "${vis}" \
              --timestamp "$timestamp" \
              ${dataparser} & GPU_PID[$idx]=$!
