@@ -37,7 +37,7 @@ from nerfstudio.utils.io import load_from_json, write_to_json
 from nerfstudio.utils.writer import GLOBAL_BUFFER, EventName
 from nerfstudio.viewer.server import viewer_utils
 from nerfstudio.viewer.server.control_panel import ControlPanel
-from nerfstudio.viewer.server.gui_utils import get_viewer_elements
+from nerfstudio.viewer.server.gui_utils import parse_object
 from nerfstudio.viewer.server.render_state_machine import (
     RenderAction,
     RenderStateMachine,
@@ -122,7 +122,7 @@ class ViewerState:
 
         self.camera_message = None
 
-        self.viser_server = ViserServer(host="127.0.0.1", port=websocket_port)
+        self.viser_server = ViserServer(host=config.websocket_host, port=websocket_port)
 
         self.viser_server.register_handler(TrainingStateMessage, self._handle_training_state_message)
         self.viser_server.register_handler(SaveCheckpointMessage, self._handle_save_checkpoint)
@@ -149,7 +149,11 @@ class ViewerState:
                 with self.viser_server.gui_folder(folder_labels[0]):
                     nested_folder_install(folder_labels[1:], element)
 
-        self.viewer_elements = get_viewer_elements(self.pipeline)
+        self.viewer_elements = []
+        if self.trainer is not None:
+            self.viewer_elements.extend(parse_object(self.trainer, ViewerElement, "Trainer"))
+        else:
+            self.viewer_elements.extend(parse_object(pipeline, ViewerElement, "Pipeline"))
         for param_path, element in self.viewer_elements:
             folder_labels = param_path.split("/")[:-1]
             nested_folder_install(folder_labels, element)
@@ -173,7 +177,7 @@ class ViewerState:
         scene_box = SceneBox(aabb=torch.stack([crop_min, crop_max], dim=0))
         self.viser_server.update_scene_box(scene_box)
         crop_scale = crop_max - crop_min
-        crop_center = crop_max + crop_min
+        crop_center = (crop_max + crop_min) / 2.0
         self.viser_server.send_crop_params(
             crop_enabled=self.control_panel.crop_viewport,
             crop_bg_color=self.control_panel.background_color,

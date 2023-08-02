@@ -27,7 +27,10 @@ from threading import Lock
 from typing import Dict, List, Optional, Tuple, Type, Union
 
 import torch
+from rich import box, style
 from rich.console import Console
+from rich.panel import Panel
+from rich.table import Table
 from torch.cuda.amp.grad_scaler import GradScaler
 from typing_extensions import Literal
 
@@ -75,6 +78,8 @@ class TrainerConfig(ExperimentConfig):
     """Maximum number of iterations to run."""
     mixed_precision: bool = False
     """Whether or not to use mixed precision for training."""
+    use_grad_scaler: bool = False
+    """Use gradient scaler even if the automatic mixed precision is disabled."""
     save_only_latest_checkpoint: bool = True
     """Whether to only save the latest checkpoint or all checkpoints."""
     # optional parameters if we want to resume training
@@ -118,13 +123,15 @@ class Trainer:
         self.world_size = world_size
         self.device: TORCH_DEVICE = "cpu" if world_size == 0 else f"cuda:{local_rank}"
         self.mixed_precision: bool = self.config.mixed_precision
+        self.use_grad_scaler: bool = self.mixed_precision or self.config.use_grad_scaler
         self.training_state: Literal["training", "paused", "completed"] = "training"
+
         if self.device == "cpu":
             self.mixed_precision = False
             CONSOLE.print("Mixed precision is disabled for CPU training.")
         self._start_step: int = 0
         # optimizers
-        self.grad_scaler = GradScaler(enabled=self.mixed_precision)
+        self.grad_scaler = GradScaler(enabled=self.use_grad_scaler)
 
         self.base_dir: Path = config.get_base_dir()
         # directory to save checkpoints
@@ -277,14 +284,17 @@ class Trainer:
         # write out any remaining events (e.g., total train time)
         writer.write_out_storage()
 
-        CONSOLE.rule()
-        CONSOLE.print("[bold green]:tada: :tada: :tada: Training Finished :tada: :tada: :tada:", justify="center")
-        if not self.config.viewer.quit_on_train_completion:
-            self.training_state = "completed"
-            self._train_complete_viewer()
-            CONSOLE.print("Use ctrl+c to quit", justify="center")
-            while True:
-                time.sleep(0.01)
+        table = Table(
+            title=None,
+            show_header=False,
+            box=box.MINIMAL,
+            title_style=style.Style(bold=True),
+        )
+        table.add_row("Config File", str(self.config.get_base_dir() / "config.yml"))
+        table.add_row("Checkpoint Directory", str(self.checkpoint_dir))
+        CONSOLE.print(Panel(table, title="[bold][green]:tada: Training Finished :tada:[/bold]", expand=False))
+
+        self._train_complete_viewer()
 
     @check_main_thread
     def _check_viewer_warnings(self) -> None:
@@ -329,11 +339,16 @@ class Trainer:
     def _train_complete_viewer(self) -> None:
         """Let the viewer know that the training is complete"""
         assert self.viewer_state is not None
+        if not self.config.viewer.quit_on_train_completion:
+            self.training_state = "completed"
         try:
             self.viewer_state.training_complete()
         except RuntimeError:
             time.sleep(0.03)  # sleep to allow buffer to reset
             CONSOLE.log("Viewer failed. Continuing training.")
+        CONSOLE.print("Use ctrl+c to quit", justify="center")
+        while True:
+            time.sleep(0.01)
 
     @check_viewer_enabled
     def _update_viewer_rays_per_sec(self, train_t: TimeWriter, vis_t: TimeWriter, step: int) -> None:
