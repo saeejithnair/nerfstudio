@@ -1,4 +1,4 @@
-# Copyright 2022 The Nerfstudio Team. All rights reserved.
+# Copyright 2022 the Regents of the University of California, Nerfstudio Team and contributors. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -14,25 +14,19 @@
 
 """Base Configs"""
 
-# pylint: disable=wrong-import-position
 
 from __future__ import annotations
 
-import warnings
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, List, Optional, Tuple, Type
-
-from typing_extensions import Literal
+from typing import Any, List, Literal, Optional, Tuple, Type
 
 # model instances
 from nerfstudio.utils import writer
 
-warnings.filterwarnings("ignore", module="torchvision")
-
 
 # Pretty printing class
-class PrintableConfig:  # pylint: disable=too-few-public-methods
+class PrintableConfig:
     """Printable Config defining str function"""
 
     def __str__(self):
@@ -50,7 +44,7 @@ class PrintableConfig:  # pylint: disable=too-few-public-methods
 
 # Base instantiate configs
 @dataclass
-class InstantiateConfig(PrintableConfig):  # pylint: disable=too-few-public-methods
+class InstantiateConfig(PrintableConfig):
     """Config class for instantiating an the class specified in the _target attribute."""
 
     _target: Type
@@ -67,14 +61,16 @@ class MachineConfig(PrintableConfig):
 
     seed: int = 42
     """random seed initialization"""
-    num_gpus: int = 1
-    """total number of gpus available for train/eval"""
+    num_devices: int = 1
+    """total number of devices (e.g., gpus) available for train/eval"""
     num_machines: int = 1
     """total number of distributed machines available (for DDP)"""
     machine_rank: int = 0
     """current machine's rank (for DDP)"""
     dist_url: str = "auto"
     """distributed connection point (for DDP)"""
+    device_type: Literal["cpu", "cuda", "mps"] = "cuda"
+    """device type to use for training"""
 
 
 @dataclass
@@ -150,3 +146,5 @@ class ViewerConfig(PrintableConfig):
     """Image format viewer should use; jpeg is lossy compression, while png is lossless."""
     jpeg_quality: int = 90
     """Quality tradeoff to use for jpeg compression."""
+    make_share_url: bool = False
+    """Viewer beta feature: print a shareable URL. `vis` must be set to viewer_beta; this flag is otherwise ignored."""

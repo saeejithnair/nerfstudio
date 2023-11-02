@@ -70,46 +70,82 @@ Nerfstudio initially launched as an opensource project by Berkeley students in [
 
 We are committed to providing learning resources to help you understand the basics of (if you're just getting started), and keep up-to-date with (if you're a seasoned veteran) all things NeRF. As researchers, we know just how hard it is to get onboarded with this next-gen technology. So we're here to help with tutorials, documentation, and more!
 
-Have feature requests? Want to add your brand-spankin'-new NeRF model? Have a new dataset? **We welcome any and all [contributions](https://docs.nerf.studio/en/latest/reference/contributing.html)!** Please do not hesitate to reach out to the nerfstudio team with any questions via [Discord](https://discord.gg/uMbNqcraFc).
+Have feature requests? Want to add your brand-spankin'-new NeRF model? Have a new dataset? **We welcome [contributions](https://docs.nerf.studio/en/latest/reference/contributing.html)!** Please do not hesitate to reach out to the nerfstudio team with any questions via [Discord](https://discord.gg/uMbNqcraFc).
+
+Have feedback? We'd love for you to fill out our [Nerfstudio Feedback Form](https://forms.gle/sqN5phJN7LfQVwnP9) if you want to let us know who you are, why you are interested in Nerfstudio, or provide any feedback!
 
 We hope nerfstudio enables you to build faster :hammer: learn together :books: and contribute to our NeRF community :sparkling_heart:.
+
+## Sponsors
+Sponsors of this work includes [Luma AI](https://lumalabs.ai/) and the [BAIR commons](https://bcommons.berkeley.edu/home).
+
+<p align="left">
+    <a href="https://lumalabs.ai/">
+        <!-- pypi-strip -->
+        <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="docs/_static/imgs/luma_dark.png">
+        <source media="(prefers-color-scheme: light)" srcset="docs/_static/imgs/luma_light.png">
+        <!-- /pypi-strip -->
+        <img alt="Luma AI" src="docs/_static/imgs/luma_light.png" width="300">
+        <!-- pypi-strip -->
+        </picture>
+        <!-- /pypi-strip -->
+    </a>
+    <a href="https://bcommons.berkeley.edu/home">
+        <!-- pypi-strip -->
+        <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="docs/_static/imgs/bair_dark.png">
+        <source media="(prefers-color-scheme: light)" srcset="docs/_static/imgs/bair_light.png">
+        <!-- /pypi-strip -->
+        <img alt="BAIR" src="docs/_static/imgs/bair_light.png" width="300">
+        <!-- pypi-strip -->
+        </picture>
+        <!-- /pypi-strip -->
+    </a>
+</p>
+
 
 # Quickstart
 
 The quickstart will help you get started with the default vanilla NeRF trained on the classic Blender Lego scene.
-For more complex changes (e.g., running with your own data/setting up a new NeRF graph, please refer to our [references](#learn-more).
+For more complex changes (e.g., running with your own data/setting up a new NeRF graph), please refer to our [references](#learn-more).
 
 ## 1. Installation: Setup the environment
 
 ### Prerequisites
 
-You must have an NVIDIA video card with CUDA installed on the system. This library has been tested with version 11.3 of CUDA. You can find more information about installing CUDA [here](https://docs.nvidia.com/cuda/cuda-quick-start-guide/index.html)
+You must have an NVIDIA video card with CUDA installed on the system. This library has been tested with version 11.8 of CUDA. You can find more information about installing CUDA [here](https://docs.nvidia.com/cuda/cuda-quick-start-guide/index.html)
 
 ### Create environment
 
-Nerfstudio requires `python >= 3.7`. We recommend using conda to manage dependencies. Make sure to install [Conda](https://docs.conda.io/en/latest/miniconda.html) before proceeding.
+Nerfstudio requires `python >= 3.8`. We recommend using conda to manage dependencies. Make sure to install [Conda](https://docs.conda.io/en/latest/miniconda.html) before proceeding.
 
 ```bash
 conda create --name nerfstudio -y python=3.8
 conda activate nerfstudio
-python -m pip install --upgrade pip
+pip install --upgrade pip
 ```
 
 ### Dependencies
 
-Install pytorch with CUDA (this repo has been tested with CUDA 11.3 and CUDA 11.7) and [tiny-cuda-nn](https://github.com/NVlabs/tiny-cuda-nn)
-
-For CUDA 11.3:
-
-```bash
-pip install torch==1.12.1+cu113 torchvision==0.13.1+cu113 -f https://download.pytorch.org/whl/torch_stable.html
-pip install ninja git+https://github.com/NVlabs/tiny-cuda-nn/#subdirectory=bindings/torch
-```
+Install PyTorch with CUDA (this repo has been tested with CUDA 11.7 and CUDA 11.8) and [tiny-cuda-nn](https://github.com/NVlabs/tiny-cuda-nn).
+`cuda-toolkit` is required for building `tiny-cuda-nn`.
 
 For CUDA 11.7:
 
 ```bash
-pip install torch==1.13.1 torchvision functorch --extra-index-url https://download.pytorch.org/whl/cu117
+pip install torch==2.0.1+cu117 torchvision==0.15.2+cu117 --extra-index-url https://download.pytorch.org/whl/cu117
+
+conda install -c "nvidia/label/cuda-11.7.1" cuda-toolkit
+pip install ninja git+https://github.com/NVlabs/tiny-cuda-nn/#subdirectory=bindings/torch
+```
+
+For CUDA 11.8:
+
+```bash
+pip install torch==2.0.1+cu118 torchvision==0.15.2+cu118 --extra-index-url https://download.pytorch.org/whl/cu118
+
+conda install -c "nvidia/label/cuda-11.8.0" cuda-toolkit
 pip install ninja git+https://github.com/NVlabs/tiny-cuda-nn/#subdirectory=bindings/torch
 ```
 
@@ -168,7 +204,13 @@ It is possible to load a pretrained model by running
 ns-train nerfacto --data data/nerfstudio/poster --load-dir {outputs/.../nerfstudio_models}
 ```
 
-This will automatically start training. If you do not want it to train, add `--viewer.start-train False` to your training command.
+## Visualize existing run
+
+Given a pretrained model checkpoint, you can start the viewer by running
+
+```bash
+ns-viewer --load-config {outputs/.../config.yml}
+```
 
 ## 3. Exporting Results
 
@@ -232,7 +274,7 @@ ns-train nerfacto --help
 
 ### Tensorboard / WandB / Viewer
 
-We support three different methods to track training progress, using the viewer, [tensorboard](https://www.tensorflow.org/tensorboard), and [Weights and Biases](https://wandb.ai/site). You can specify which visualizer to use by appending `--vis {viewer, tensorboard, wandb, viewer+wandb, viewer+tensorboard}` to the training command. Simultaneously utilizing the viewer alongside wandb or tensorboard may cause stuttering issues during evaluation steps. The viewer only works for methods that are fast (ie. nerfacto, instant-ngp), for slower methods like NeRF, use the other loggers.
+We support four different methods to track training progress, using the viewer[tensorboard](https://www.tensorflow.org/tensorboard), [Weights and Biases](https://wandb.ai/site), and ,[Comet](https://comet.com/?utm_source=nerf&utm_medium=referral&utm_content=github). You can specify which visualizer to use by appending `--vis {viewer, tensorboard, wandb, comet viewer+wandb, viewer+tensorboard, viewer+comet}` to the training command. Simultaneously utilizing the viewer alongside wandb or tensorboard may cause stuttering issues during evaluation steps. The viewer only works for methods that are fast (ie. nerfacto, instant-ngp), for slower methods like NeRF, use the other loggers.
 
 # Learn More
 
@@ -258,6 +300,7 @@ If you're interested in learning more on how to create your own pipelines, devel
 | 💖 **Community**                                                                                   |
 | [Discord](https://discord.gg/uMbNqcraFc)                                                           | Join our community to discuss more. We would love to hear from you!                                |
 | [Twitter](https://twitter.com/nerfstudioteam)                                                      | Follow us on Twitter @nerfstudioteam to see cool updates and announcements                         |
+| [Feedback Form](TODO)                                                                              | We welcome any feedback! This is our chance to learn what you all are using Nerfstudio for.    |
 
 # Supported Features
 
@@ -311,13 +354,17 @@ You can find a paper writeup of the framework on [arXiv](https://arxiv.org/abs/2
 If you use this library or find the documentation useful for your research, please consider citing:
 
 ```
-@article{nerfstudio,
-    author = {Tancik, Matthew and Weber, Ethan and Ng, Evonne and Li, Ruilong and Yi,
-            Brent and Kerr, Justin and Wang, Terrance and Kristoffersen, Alexander and Austin,
-            Jake and Salahi, Kamyar and Ahuja, Abhik and McAllister, David and Kanazawa, Angjoo},
-    title = {Nerfstudio: A Modular Framework for Neural Radiance Field Development},
-    journal = {arXiv preprint arXiv:2302.04264},
-    year = {2023},
+@inproceedings{nerfstudio,
+	title        = {Nerfstudio: A Modular Framework for Neural Radiance Field Development},
+	author       = {
+		Tancik, Matthew and Weber, Ethan and Ng, Evonne and Li, Ruilong and Yi, Brent
+		and Kerr, Justin and Wang, Terrance and Kristoffersen, Alexander and Austin,
+		Jake and Salahi, Kamyar and Ahuja, Abhik and McAllister, David and Kanazawa,
+		Angjoo
+	},
+	year         = 2023,
+	booktitle    = {ACM SIGGRAPH 2023 Conference Proceedings},
+	series       = {SIGGRAPH '23}
 }
 ```
 

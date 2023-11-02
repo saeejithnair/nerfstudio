@@ -1,4 +1,4 @@
-# Copyright 2022 The Nerfstudio Team. All rights reserved.
+# Copyright 2022 the Regents of the University of California, Nerfstudio Team and contributors. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -19,22 +19,23 @@ import base64
 import math
 from dataclasses import dataclass
 from enum import Enum, auto
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Literal, Optional, Tuple, Union
 
 import cv2
 import torch
 import torchvision
+from jaxtyping import Float, Int, Shaped
+from torch import Tensor
 from torch.nn import Parameter
-from torchtyping import TensorType
 
 import nerfstudio.utils.math
 import nerfstudio.utils.poses as pose_utils
 from nerfstudio.cameras import camera_utils
 from nerfstudio.cameras.rays import RayBundle
-from nerfstudio.data.scene_box import SceneBox
+from nerfstudio.data.scene_box import SceneBox, OrientedBox
 from nerfstudio.utils.tensor_dataclass import TensorDataclass
 
-TORCH_DEVICE = Union[torch.device, str]  # pylint: disable=invalid-name
+TORCH_DEVICE = Union[torch.device, str]
 
 
 class CameraType(Enum):
@@ -43,6 +44,10 @@ class CameraType(Enum):
     PERSPECTIVE = auto()
     FISHEYE = auto()
     EQUIRECTANGULAR = auto()
+    OMNIDIRECTIONALSTEREO_L = auto()
+    OMNIDIRECTIONALSTEREO_R = auto()
+    VR180_L = auto()
+    VR180_R = auto()
 
 
 CAMERA_MODEL_TO_TYPE = {
@@ -53,6 +58,10 @@ CAMERA_MODEL_TO_TYPE = {
     "OPENCV": CameraType.PERSPECTIVE,
     "OPENCV_FISHEYE": CameraType.FISHEYE,
     "EQUIRECTANGULAR": CameraType.EQUIRECTANGULAR,
+    "OMNIDIRECTIONALSTEREO_L": CameraType.OMNIDIRECTIONALSTEREO_L,
+    "OMNIDIRECTIONALSTEREO_R": CameraType.OMNIDIRECTIONALSTEREO_R,
+    "VR180_L": CameraType.VR180_L,
+    "VR180_R": CameraType.VR180_R,
 }
 
 
@@ -77,44 +86,42 @@ class Cameras(TensorDataclass):
             and will be broadcasted to the rays generated from any derivative RaySamples we create with this
     """
 
-    camera_to_worlds: TensorType["num_cameras":..., 3, 4]
-    fx: TensorType["num_cameras":..., 1]
-    fy: TensorType["num_cameras":..., 1]
-    cx: TensorType["num_cameras":..., 1]
-    cy: TensorType["num_cameras":..., 1]
-    width: TensorType["num_cameras":..., 1]
-    height: TensorType["num_cameras":..., 1]
-    distortion_params: Optional[TensorType["num_cameras":..., 6]]
-    camera_type: TensorType["num_cameras":..., 1]
-    times: Optional[TensorType["num_cameras", 1]]
+    camera_to_worlds: Float[Tensor, "*num_cameras 3 4"]
+    fx: Float[Tensor, "*num_cameras 1"]
+    fy: Float[Tensor, "*num_cameras 1"]
+    cx: Float[Tensor, "*num_cameras 1"]
+    cy: Float[Tensor, "*num_cameras 1"]
+    width: Shaped[Tensor, "*num_cameras 1"]
+    height: Shaped[Tensor, "*num_cameras 1"]
+    distortion_params: Optional[Float[Tensor, "*num_cameras 6"]]
+    camera_type: Int[Tensor, "*num_cameras 1"]
+    times: Optional[Float[Tensor, "num_cameras 1"]]
     metadata: Optional[Dict]
 
     def __init__(
         self,
-        camera_to_worlds: TensorType["batch_c2ws":..., 3, 4],
-        fx: Union[TensorType["batch_fxs":..., 1], float],
-        fy: Union[TensorType["batch_fys":..., 1], float],
-        cx: Union[TensorType["batch_cxs":..., 1], float],
-        cy: Union[TensorType["batch_cys":..., 1], float],
-        width: Optional[Union[TensorType["batch_ws":..., 1], int]] = None,
-        height: Optional[Union[TensorType["batch_hs":..., 1], int]] = None,
-        distortion_params: Optional[TensorType["batch_dist_params":..., 6]] = None,
-        camera_type: Optional[
-            Union[
-                TensorType["batch_cam_types":..., 1],
-                int,
-                List[CameraType],
-                CameraType,
-            ]
+        camera_to_worlds: Float[Tensor, "*batch_c2ws 3 4"],
+        fx: Union[Float[Tensor, "*batch_fxs 1"], float],
+        fy: Union[Float[Tensor, "*batch_fys 1"], float],
+        cx: Union[Float[Tensor, "*batch_cxs 1"], float],
+        cy: Union[Float[Tensor, "*batch_cys 1"], float],
+        width: Optional[Union[Shaped[Tensor, "*batch_ws 1"], int]] = None,
+        height: Optional[Union[Shaped[Tensor, "*batch_hs 1"], int]] = None,
+        distortion_params: Optional[Float[Tensor, "*batch_dist_params 6"]] = None,
+        camera_type: Union[
+            Int[Tensor, "*batch_cam_types 1"],
+            int,
+            List[CameraType],
+            CameraType,
         ] = CameraType.PERSPECTIVE,
-        times: Optional[TensorType["num_cameras"]] = None,
+        times: Optional[Float[Tensor, "num_cameras"]] = None,
         metadata: Optional[Dict] = None,
     ) -> None:
         """Initializes the Cameras object.
 
-        Note on Input Tensor Dimensions: All of these tensors have items of dimensions TensorType[3, 4]
-        (in the case of the c2w matrices), TensorType[6] (in the case of distortion params), or
-        TensorType[1] (in the case of the rest of the elements). The dimensions before that are
+        Note on Input Tensor Dimensions: All of these tensors have items of dimensions Shaped[Tensor, "3 4"]
+        (in the case of the c2w matrices), Shaped[Tensor, "6"] (in the case of distortion params), or
+        Shaped[Tensor, "1"] (in the case of the rest of the elements). The dimensions before that are
         considered the batch dimension of that tensor (batch_c2ws, batch_fxs, etc.). We will broadcast
         all the tensors to be the same batch dimension. This means you can use any combination of the
         input types in the function signature and it won't break. Your batch size for all tensors
@@ -172,9 +179,9 @@ class Cameras(TensorDataclass):
     def _init_get_camera_type(
         self,
         camera_type: Union[
-            TensorType["batch_cam_types":..., 1], TensorType["batch_cam_types":...], int, List[CameraType], CameraType
+            Int[Tensor, "*batch_cam_types 1"], Int[Tensor, "*batch_cam_types"], int, List[CameraType], CameraType
         ],
-    ) -> TensorType["num_cameras":..., 1]:
+    ) -> Int[Tensor, "*num_cameras 1"]:
         """
         Parses the __init__() argument camera_type
 
@@ -213,9 +220,9 @@ class Cameras(TensorDataclass):
 
     def _init_get_height_width(
         self,
-        h_w: Union[TensorType["batch_hws":..., 1], TensorType["batch_hws":...], int, None],
-        c_x_y: TensorType["batch_cxys":...],
-    ) -> TensorType["num_cameras":..., 1]:
+        h_w: Union[Shaped[Tensor, "*batch_hws 1"], Shaped[Tensor, "*batch_hws"], int, None],
+        c_x_y: Shaped[Tensor, "*batch_cxys"],
+    ) -> Shaped[Tensor, "*num_cameras 1"]:
         """
         Parses the __init__() argument for height or width
 
@@ -260,12 +267,12 @@ class Cameras(TensorDataclass):
         return self.camera_to_worlds.device
 
     @property
-    def image_height(self) -> TensorType["num_cameras":..., 1]:
+    def image_height(self) -> Shaped[Tensor, "*num_cameras 1"]:
         """Returns the height of the images."""
         return self.height
 
     @property
-    def image_width(self) -> TensorType["num_cameras":..., 1]:
+    def image_width(self) -> Shaped[Tensor, "*num_cameras 1"]:
         """Returns the height of the images."""
         return self.width
 
@@ -281,7 +288,7 @@ class Cameras(TensorDataclass):
 
     def get_image_coords(
         self, pixel_offset: float = 0.5, index: Optional[Tuple] = None
-    ) -> TensorType["height", "width", 2]:
+    ) -> Float[Tensor, "height width 2"]:
         """This gets the image coordinates of one of the cameras in this object.
 
         If no index is specified, it will return the maximum possible sized height / width image coordinate map,
@@ -296,8 +303,8 @@ class Cameras(TensorDataclass):
             Grid of image coordinates.
         """
         if index is None:
-            image_height = torch.max(self.image_height.view(-1))
-            image_width = torch.max(self.image_width.view(-1))
+            image_height = torch.max(self.image_height.view(-1)).item()
+            image_width = torch.max(self.image_width.view(-1)).item()
             image_coords = torch.meshgrid(torch.arange(image_height), torch.arange(image_width), indexing="ij")
             image_coords = torch.stack(image_coords, dim=-1) + pixel_offset  # stored as (y, x) coordinates
         else:
@@ -307,39 +314,42 @@ class Cameras(TensorDataclass):
             image_coords = torch.stack(image_coords, dim=-1) + pixel_offset  # stored as (y, x) coordinates
         return image_coords
 
-    def generate_rays(  # pylint: disable=too-many-statements
+    def generate_rays(
         self,
-        camera_indices: Union[TensorType["num_rays":..., "num_cameras_batch_dims"], int],
-        coords: Optional[TensorType["num_rays":..., 2]] = None,
-        camera_opt_to_camera: Optional[TensorType["num_rays":..., 3, 4]] = None,
-        distortion_params_delta: Optional[TensorType["num_rays":..., 6]] = None,
+        camera_indices: Union[Int[Tensor, "*num_rays num_cameras_batch_dims"], int],
+        coords: Optional[Float[Tensor, "*num_rays 2"]] = None,
+        camera_opt_to_camera: Optional[Float[Tensor, "*num_rays 3 4"]] = None,
+        distortion_params_delta: Optional[Float[Tensor, "*num_rays 6"]] = None,
         keep_shape: Optional[bool] = None,
         disable_distortion: bool = False,
         aabb_box: Optional[SceneBox] = None,
+        obb_box: Optional[OrientedBox] = None,
     ) -> RayBundle:
         """Generates rays for the given camera indices.
 
         This function will standardize the input arguments and then call the _generate_rays_from_coords function
         to generate the rays. Our goal is to parse the arguments and then get them into the right shape:
-            - camera_indices: (num_rays:..., num_cameras_batch_dims)
-            - coords: (num_rays:..., 2)
-            - camera_opt_to_camera: (num_rays:..., 3, 4) or None
-            - distortion_params_delta: (num_rays:..., 6) or None
+
+        - camera_indices: (num_rays:..., num_cameras_batch_dims)
+        - coords: (num_rays:..., 2)
+        - camera_opt_to_camera: (num_rays:..., 3, 4) or None
+        - distortion_params_delta: (num_rays:..., 6) or None
 
         Read the docstring for _generate_rays_from_coords for more information on how we generate the rays
         after we have standardized the arguments.
 
         We are only concerned about different combinations of camera_indices and coords matrices, and the following
         are the 4 cases we have to deal with:
-            1. isinstance(camera_indices, int) and coords == None
-                - In this case we broadcast our camera_indices / coords shape (h, w, 1 / 2 respectively)
-            2. isinstance(camera_indices, int) and coords != None
-                - In this case, we broadcast camera_indices to the same batch dim as coords
-            3. not isinstance(camera_indices, int) and coords == None
-                - In this case, we will need to set coords so that it is of shape (h, w, num_rays, 2), and broadcast
-                    all our other args to match the new definition of num_rays := (h, w) + num_rays
-            4. not isinstance(camera_indices, int) and coords != None
-                - In this case, we have nothing to do, only check that the arguments are of the correct shape
+
+        1. isinstance(camera_indices, int) and coords == None
+            - In this case we broadcast our camera_indices / coords shape (h, w, 1 / 2 respectively)
+        2. isinstance(camera_indices, int) and coords != None
+            - In this case, we broadcast camera_indices to the same batch dim as coords
+        3. not isinstance(camera_indices, int) and coords == None
+            - In this case, we will need to set coords so that it is of shape (h, w, num_rays, 2), and broadcast
+                all our other args to match the new definition of num_rays := (h, w) + num_rays
+        4. not isinstance(camera_indices, int) and coords != None
+            - In this case, we have nothing to do, only check that the arguments are of the correct shape
 
         There is one more edge case we need to be careful with: when we have "jagged cameras" (ie: different heights
         and widths for each camera). This isn't problematic when we specify coords, since coords is already a tensor.
@@ -358,7 +368,7 @@ class Cameras(TensorDataclass):
                 keeping dimensions. If False, we flatten at the end. If True, then we keep the shape of the
                 camera_indices and coords tensors (if we can).
             disable_distortion: If True, disables distortion.
-            aabb_box: if not None will calculate nears and fars of the ray according to aabb box intesection
+            aabb_box: if not None will calculate nears and fars of the ray according to aabb box intersection
 
         Returns:
             Rays for the given camera indices and coords.
@@ -424,7 +434,7 @@ class Cameras(TensorDataclass):
         if coords is None:
             index_dim = camera_indices.shape[-1]
             index = camera_indices.reshape(-1, index_dim)[0]
-            coords: torch.Tensor = cameras.get_image_coords(index=tuple(index))  # (h, w, 2)
+            coords = cameras.get_image_coords(index=tuple(index))  # (h, w, 2)
             coords = coords.reshape(coords.shape[:2] + (1,) * len(camera_indices.shape[:-1]) + (2,))  # (h, w, 1..., 2)
             coords = coords.expand(coords.shape[:2] + camera_indices.shape[:-1] + (2,))  # (h, w, num_rays, 2)
             camera_opt_to_camera = (  # (h, w, num_rays, 3, 4) or None
@@ -449,7 +459,7 @@ class Cameras(TensorDataclass):
 
         # This will do the actual work of generating the rays now that we have standardized the inputs
         # raybundle.shape == (num_rays) when done
-        # pylint: disable=protected-access
+
         raybundle = cameras._generate_rays_from_coords(
             camera_indices, coords, camera_opt_to_camera, distortion_params_delta, disable_distortion=disable_distortion
         )
@@ -458,20 +468,24 @@ class Cameras(TensorDataclass):
         if keep_shape is False:
             raybundle = raybundle.flatten()
 
-        if aabb_box:
+        if aabb_box is not None or obb_box is not None:
             with torch.no_grad():
-                tensor_aabb = Parameter(aabb_box.aabb.flatten(), requires_grad=False)
-
                 rays_o = raybundle.origins.contiguous()
                 rays_d = raybundle.directions.contiguous()
 
-                tensor_aabb = tensor_aabb.to(rays_o.device)
                 shape = rays_o.shape
 
                 rays_o = rays_o.reshape((-1, 3))
                 rays_d = rays_d.reshape((-1, 3))
 
-                t_min, t_max = nerfstudio.utils.math.intersect_aabb(rays_o, rays_d, tensor_aabb)
+                if aabb_box is not None:
+                    tensor_aabb = Parameter(aabb_box.aabb.flatten(), requires_grad=False)
+                    tensor_aabb = tensor_aabb.to(rays_o.device)
+                    t_min, t_max = nerfstudio.utils.math.intersect_aabb(rays_o, rays_d, tensor_aabb)
+                elif obb_box is not None:
+                    t_min, t_max = nerfstudio.utils.math.intersect_obb(rays_o, rays_d, obb_box)
+                else:
+                    assert False
 
                 t_min = t_min.reshape([shape[0], shape[1], 1])
                 t_max = t_max.reshape([shape[0], shape[1], 1])
@@ -484,13 +498,12 @@ class Cameras(TensorDataclass):
         # that we haven't caught yet with tests
         return raybundle
 
-    # pylint: disable=too-many-statements
     def _generate_rays_from_coords(
         self,
-        camera_indices: TensorType["num_rays":..., "num_cameras_batch_dims"],
-        coords: TensorType["num_rays":..., 2],
-        camera_opt_to_camera: Optional[TensorType["num_rays":..., 3, 4]] = None,
-        distortion_params_delta: Optional[TensorType["num_rays":..., 6]] = None,
+        camera_indices: Int[Tensor, "*num_rays num_cameras_batch_dims"],
+        coords: Float[Tensor, "*num_rays 2"],
+        camera_opt_to_camera: Optional[Float[Tensor, "*num_rays 3 4"]] = None,
+        distortion_params_delta: Optional[Float[Tensor, "*num_rays 6"]] = None,
         disable_distortion: bool = False,
     ) -> RayBundle:
         """Generates rays for the given camera indices and coords where self isn't jagged
@@ -645,47 +658,181 @@ class Cameras(TensorDataclass):
         # directions_stack[2] is the direction for ray in camera coordinates offset by 1 in y
         cam_types = torch.unique(self.camera_type, sorted=False)
         directions_stack = torch.empty((3,) + num_rays_shape + (3,), device=self.device)
-        if CameraType.PERSPECTIVE.value in cam_types:
-            mask = (self.camera_type[true_indices] == CameraType.PERSPECTIVE.value).squeeze(-1)  # (num_rays)
+
+        c2w = self.camera_to_worlds[true_indices]
+        assert c2w.shape == num_rays_shape + (3, 4)
+
+        def _compute_rays_for_omnidirectional_stereo(
+            eye: Literal["left", "right"]
+        ) -> Tuple[Float[Tensor, "num_rays_shape 3"], Float[Tensor, "3 num_rays_shape 3"]]:
+            """Compute the rays for an omnidirectional stereo camera
+
+            Args:
+                eye: Which eye to compute rays for.
+
+            Returns:
+                A tuple containing the origins and the directions of the rays.
+            """
+            # Directions calculated similarly to equirectangular
+            ods_cam_type = (
+                CameraType.OMNIDIRECTIONALSTEREO_R.value if eye == "right" else CameraType.OMNIDIRECTIONALSTEREO_L.value
+            )
+            mask = (self.camera_type[true_indices] == ods_cam_type).squeeze(-1)
             mask = torch.stack([mask, mask, mask], dim=0)
-            directions_stack[..., 0][mask] = torch.masked_select(coord_stack[..., 0], mask).float()
-            directions_stack[..., 1][mask] = torch.masked_select(coord_stack[..., 1], mask).float()
-            directions_stack[..., 2][mask] = -1.0
-
-        if CameraType.FISHEYE.value in cam_types:
-            mask = (self.camera_type[true_indices] == CameraType.FISHEYE.value).squeeze(-1)  # (num_rays)
-            mask = torch.stack([mask, mask, mask], dim=0)
-
-            theta = torch.sqrt(torch.sum(coord_stack**2, dim=-1))
-            theta = torch.clip(theta, 0.0, math.pi)
-
-            sin_theta = torch.sin(theta)
-
-            directions_stack[..., 0][mask] = torch.masked_select(coord_stack[..., 0] * sin_theta / theta, mask).float()
-            directions_stack[..., 1][mask] = torch.masked_select(coord_stack[..., 1] * sin_theta / theta, mask).float()
-            directions_stack[..., 2][mask] = -torch.masked_select(torch.cos(theta), mask).float()
-
-        if CameraType.EQUIRECTANGULAR.value in cam_types:
-            mask = (self.camera_type[true_indices] == CameraType.EQUIRECTANGULAR.value).squeeze(-1)  # (num_rays)
-            mask = torch.stack([mask, mask, mask], dim=0)
-
-            # For equirect, fx = fy = height = width/2
-            # Then coord[..., 0] goes from -1 to 1 and coord[..., 1] goes from -1/2 to 1/2
-            theta = -torch.pi * coord_stack[..., 0]  # minus sign for right-handed
+            theta = -torch.pi * coord_stack[..., 0]
             phi = torch.pi * (0.5 - coord_stack[..., 1])
-            # use spherical in local camera coordinates (+y up, x=0 and z<0 is theta=0)
+
             directions_stack[..., 0][mask] = torch.masked_select(-torch.sin(theta) * torch.sin(phi), mask).float()
             directions_stack[..., 1][mask] = torch.masked_select(torch.cos(phi), mask).float()
             directions_stack[..., 2][mask] = torch.masked_select(-torch.cos(theta) * torch.sin(phi), mask).float()
 
-        for value in cam_types:
-            if value not in [CameraType.PERSPECTIVE.value, CameraType.FISHEYE.value, CameraType.EQUIRECTANGULAR.value]:
-                raise ValueError(f"Camera type {value} not supported.")
+            vr_ipd = 0.064  # IPD in meters (note: scale of NeRF must be true to life and can be adjusted with the Blender add-on)
+            isRightEye = 1 if eye == "right" else -1
+
+            # find ODS camera position
+            c2w = self.camera_to_worlds[true_indices]
+            assert c2w.shape == num_rays_shape + (3, 4)
+            transposedC2W = c2w[0][0].t()
+            ods_cam_position = transposedC2W[3].repeat(c2w.shape[1], 1)
+
+            rotation = c2w[..., :3, :3]
+
+            ods_theta = -torch.pi * ((x - cx) / fx)[0]
+
+            # local axes of ODS camera
+            ods_x_axis = torch.tensor([1, 0, 0], device=c2w.device)
+            ods_z_axis = torch.tensor([0, 0, -1], device=c2w.device)
+
+            # circle of ODS ray origins
+            ods_origins_circle = (
+                isRightEye * (vr_ipd / 2.0) * (ods_x_axis.repeat(c2w.shape[1], 1)) * (torch.cos(ods_theta))[:, None]
+                + isRightEye * (vr_ipd / 2.0) * (ods_z_axis.repeat(c2w.shape[1], 1)) * (torch.sin(ods_theta))[:, None]
+            )
+
+            # rotate origins to match the camera rotation
+            for i in range(ods_origins_circle.shape[0]):
+                ods_origins_circle[i] = rotation[0][0] @ ods_origins_circle[i] + ods_cam_position[0]
+            ods_origins_circle = ods_origins_circle.unsqueeze(0).repeat(c2w.shape[0], 1, 1)
+
+            # assign final camera origins
+            c2w[..., :3, 3] = ods_origins_circle
+
+            return ods_origins_circle, directions_stack
+
+        def _compute_rays_for_vr180(
+            eye: Literal["left", "right"]
+        ) -> Tuple[Float[Tensor, "num_rays_shape 3"], Float[Tensor, "3 num_rays_shape 3"]]:
+            """Compute the rays for a VR180 camera
+
+            Args:
+                eye: Which eye to compute rays for.
+
+            Returns:
+                A tuple containing the origins and the directions of the rays.
+            """
+            # Directions calculated similarly to equirectangular
+            vr180_cam_type = CameraType.VR180_R.value if eye == "right" else CameraType.VR180_L.value
+            mask = (self.camera_type[true_indices] == vr180_cam_type).squeeze(-1)
+            mask = torch.stack([mask, mask, mask], dim=0)
+
+            # adjusting theta range to +/-90 deg
+            theta = -torch.pi * ((x - cx) / (fx * 2))[0]
+            phi = torch.pi * (0.5 - coord_stack[..., 1])
+
+            directions_stack[..., 0][mask] = torch.masked_select(-torch.sin(theta) * torch.sin(phi), mask).float()
+            directions_stack[..., 1][mask] = torch.masked_select(torch.cos(phi), mask).float()
+            directions_stack[..., 2][mask] = torch.masked_select(-torch.cos(theta) * torch.sin(phi), mask).float()
+
+            vr_ipd = 0.064  # IPD in meters (note: scale of NeRF must be true to life and can be adjusted with the Blender add-on)
+            isRightEye = 1 if eye == "right" else -1
+
+            # find VR180 camera position
+            c2w = self.camera_to_worlds[true_indices]
+            assert c2w.shape == num_rays_shape + (3, 4)
+            transposedC2W = c2w[0][0].t()
+            vr180_cam_position = transposedC2W[3].repeat(c2w.shape[1], 1)
+
+            rotation = c2w[..., :3, :3]
+
+            # interocular axis of the VR180 camera
+            vr180_x_axis = torch.tensor([1, 0, 0], device=c2w.device)
+
+            # VR180 ray origins of horizontal offset
+            vr180_origins = isRightEye * (vr_ipd / 2.0) * (vr180_x_axis.repeat(c2w.shape[1], 1))
+
+            # rotate origins to match the camera rotation
+            for i in range(vr180_origins.shape[0]):
+                vr180_origins[i] = rotation[0][0] @ vr180_origins[i] + vr180_cam_position[0]
+
+            vr180_origins = vr180_origins.unsqueeze(0).repeat(c2w.shape[0], 1, 1)
+
+            # assign final camera origins
+            c2w[..., :3, 3] = vr180_origins
+
+            return vr180_origins, directions_stack
+
+        for cam in cam_types:
+            if CameraType.PERSPECTIVE.value in cam_types:
+                mask = (self.camera_type[true_indices] == CameraType.PERSPECTIVE.value).squeeze(-1)  # (num_rays)
+                mask = torch.stack([mask, mask, mask], dim=0)
+                directions_stack[..., 0][mask] = torch.masked_select(coord_stack[..., 0], mask).float()
+                directions_stack[..., 1][mask] = torch.masked_select(coord_stack[..., 1], mask).float()
+                directions_stack[..., 2][mask] = -1.0
+
+            elif CameraType.FISHEYE.value in cam_types:
+                mask = (self.camera_type[true_indices] == CameraType.FISHEYE.value).squeeze(-1)  # (num_rays)
+                mask = torch.stack([mask, mask, mask], dim=0)
+
+                theta = torch.sqrt(torch.sum(coord_stack**2, dim=-1))
+                theta = torch.clip(theta, 0.0, math.pi)
+
+                sin_theta = torch.sin(theta)
+
+                directions_stack[..., 0][mask] = torch.masked_select(
+                    coord_stack[..., 0] * sin_theta / theta, mask
+                ).float()
+                directions_stack[..., 1][mask] = torch.masked_select(
+                    coord_stack[..., 1] * sin_theta / theta, mask
+                ).float()
+                directions_stack[..., 2][mask] = -torch.masked_select(torch.cos(theta), mask).float()
+
+            elif CameraType.EQUIRECTANGULAR.value in cam_types:
+                mask = (self.camera_type[true_indices] == CameraType.EQUIRECTANGULAR.value).squeeze(-1)  # (num_rays)
+                mask = torch.stack([mask, mask, mask], dim=0)
+
+                # For equirect, fx = fy = height = width/2
+                # Then coord[..., 0] goes from -1 to 1 and coord[..., 1] goes from -1/2 to 1/2
+                theta = -torch.pi * coord_stack[..., 0]  # minus sign for right-handed
+                phi = torch.pi * (0.5 - coord_stack[..., 1])
+                # use spherical in local camera coordinates (+y up, x=0 and z<0 is theta=0)
+                directions_stack[..., 0][mask] = torch.masked_select(-torch.sin(theta) * torch.sin(phi), mask).float()
+                directions_stack[..., 1][mask] = torch.masked_select(torch.cos(phi), mask).float()
+                directions_stack[..., 2][mask] = torch.masked_select(-torch.cos(theta) * torch.sin(phi), mask).float()
+
+            elif CameraType.OMNIDIRECTIONALSTEREO_L.value in cam_types:
+                ods_origins_circle, directions_stack = _compute_rays_for_omnidirectional_stereo("left")
+                # assign final camera origins
+                c2w[..., :3, 3] = ods_origins_circle
+
+            elif CameraType.OMNIDIRECTIONALSTEREO_R.value in cam_types:
+                ods_origins_circle, directions_stack = _compute_rays_for_omnidirectional_stereo("right")
+                # assign final camera origins
+                c2w[..., :3, 3] = ods_origins_circle
+
+            elif CameraType.VR180_L.value in cam_types:
+                vr180_origins, directions_stack = _compute_rays_for_vr180("left")
+                # assign final camera origins
+                c2w[..., :3, 3] = vr180_origins
+
+            elif CameraType.VR180_R.value in cam_types:
+                vr180_origins, directions_stack = _compute_rays_for_vr180("right")
+                # assign final camera origins
+                c2w[..., :3, 3] = vr180_origins
+
+            else:
+                raise ValueError(f"Camera type {cam} not supported.")
 
         assert directions_stack.shape == (3,) + num_rays_shape + (3,)
-
-        c2w = self.camera_to_worlds[true_indices]
-        assert c2w.shape == num_rays_shape + (3, 4)
 
         if camera_opt_to_camera is not None:
             c2w = pose_utils.multiply(c2w, camera_opt_to_camera)
@@ -734,7 +881,7 @@ class Cameras(TensorDataclass):
         )
 
     def to_json(
-        self, camera_idx: int, image: Optional[TensorType["height", "width", 2]] = None, max_size: Optional[int] = None
+        self, camera_idx: int, image: Optional[Float[Tensor, "height width 2"]] = None, max_size: Optional[int] = None
     ) -> Dict:
         """Convert a camera to a json dictionary.
 
@@ -747,6 +894,9 @@ class Cameras(TensorDataclass):
             A JSON representation of the camera
         """
         flattened = self.flatten()
+        times = flattened[camera_idx].times
+        if times is not None:
+            times = times.item()
         json_ = {
             "type": "PinholeCamera",
             "cx": flattened[camera_idx].cx.item(),
@@ -755,20 +905,20 @@ class Cameras(TensorDataclass):
             "fy": flattened[camera_idx].fy.item(),
             "camera_to_world": self.camera_to_worlds[camera_idx].tolist(),
             "camera_index": camera_idx,
-            "times": flattened[camera_idx].times.item() if self.times is not None else None,
+            "times": times,
         }
         if image is not None:
             image_uint8 = (image * 255).detach().type(torch.uint8)
             if max_size is not None:
                 image_uint8 = image_uint8.permute(2, 0, 1)
-                image_uint8 = torchvision.transforms.functional.resize(image_uint8, max_size)  # type: ignore
+                image_uint8 = torchvision.transforms.functional.resize(image_uint8, max_size, antialias=None)  # type: ignore
                 image_uint8 = image_uint8.permute(1, 2, 0)
             image_uint8 = image_uint8.cpu().numpy()
-            data = cv2.imencode(".jpg", image_uint8)[1].tobytes()
+            data = cv2.imencode(".jpg", image_uint8)[1].tobytes()  # type: ignore
             json_["image"] = str("data:image/jpeg;base64," + base64.b64encode(data).decode("ascii"))
         return json_
 
-    def get_intrinsics_matrices(self) -> TensorType["num_cameras":..., 3, 3]:
+    def get_intrinsics_matrices(self) -> Float[Tensor, "*num_cameras 3 3"]:
         """Returns the intrinsic matrices for each camera.
 
         Returns:
@@ -783,7 +933,7 @@ class Cameras(TensorDataclass):
         return K
 
     def rescale_output_resolution(
-        self, scaling_factor: Union[TensorType["num_cameras":...], TensorType["num_cameras":..., 1], float, int]
+        self, scaling_factor: Union[Shaped[Tensor, "*num_cameras"], Shaped[Tensor, "*num_cameras 1"], float, int]
     ) -> None:
         """Rescale the output resolution of the cameras.
 

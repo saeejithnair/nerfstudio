@@ -6,12 +6,14 @@ import { CSS2DRenderer } from 'three/examples/jsm/renderers/CSS2DRenderer';
 
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls';
 import { useDispatch } from 'react-redux';
-import { drawCamera, drawSceneBox } from './drawing';
+import { drawCamera, drawSceneBox} from './drawing';
 
 import { CameraHelper } from '../SidePanel/CameraPanel/CameraHelper';
 import SceneNode from '../../SceneNode';
 import { subscribe_to_changes } from '../../subscriber';
 import { snap_to_camera } from '../SidePanel/SidePanel';
+
+import variables from '../../index.scss';
 
 const SCENE_BOX_NAME = 'Scene Box';
 const CAMERAS_NAME = 'Training Cameras';
@@ -39,7 +41,7 @@ export function get_scene_tree() {
 
   // eslint-disable-next-line react-hooks/rules-of-hooks
   const dispatch = useDispatch();
-  const BANNER_HEIGHT = 50;
+  const BANNER_HEIGHT = parseInt(variables.bannerHeight,10);
 
   // Main camera
   const main_camera = new THREE.PerspectiveCamera(75, 1, 0.1, 1000);
@@ -83,16 +85,21 @@ export function get_scene_tree() {
   CameraControls.install({ THREE });
 
   const camera_controls = new CameraControls(main_camera, renderer.domElement);
-  camera_controls.azimuthRotateSpeed = 0.3;
-  camera_controls.polarRotateSpeed = 0.3;
+  camera_controls.azimuthRotateSpeed = 0.4;
+  camera_controls.polarRotateSpeed = 0.4;
   camera_controls.dollySpeed = 0.1;
   camera_controls.infinityDolly = true;
+  camera_controls.smoothTime=.05;
+  camera_controls.draggingSmoothTime=.05;
+  camera_controls.restThreshold = .0025;
   camera_controls.saveState();
 
   const keyMap = [];
-  const moveSpeed = 0.008;
-  const rotSpeed = 0.015;
-  const EPS = 0.01;
+  const moveSpeed = 0.005;
+  const upRotSpeed = 0.04;
+  const sideRotSpeed = .01;
+  const EPS = 0.005;
+
 
   function rotate() {
     if (
@@ -108,52 +115,57 @@ export function get_scene_tree() {
         curPos.x + diff.x,
         curPos.y + diff.y,
         curPos.z + diff.z,
+        {enableTransition:true}
       );
 
       if (keyMap.ArrowLeft === true) {
-        camera_controls.rotate(rotSpeed, 0, true);
+        camera_controls.rotate(sideRotSpeed, 0, {enableTransition:true});
       }
       if (keyMap.ArrowRight === true) {
-        camera_controls.rotate(-rotSpeed, 0, true);
+        camera_controls.rotate(-sideRotSpeed, 0, {enableTransition:true});
       }
       if (keyMap.ArrowUp === true) {
-        camera_controls.rotate(0, rotSpeed / 1.5, true);
+        camera_controls.rotate(0, upRotSpeed, {enableTransition:true});
       }
       if (keyMap.ArrowDown === true) {
-        camera_controls.rotate(0, -rotSpeed / 1.5, true);
+        camera_controls.rotate(0, -upRotSpeed, {enableTransition:true});
       }
     }
   }
 
+  function translateForward(distance) {
+    const to = camera_controls.getTarget().add(
+      camera_controls.getTarget()
+        .sub(camera_controls.getPosition())
+        .normalize()
+        .multiplyScalar(distance)
+    );
+    camera_controls.moveTo(
+      to.x,
+      to.y,
+      to.z,
+      {enableTransition:true}
+    )
+  }
+
   function translate() {
     if (keyMap.KeyD === true) {
-      camera_controls.truck(moveSpeed, 0, true);
+      camera_controls.truck(moveSpeed, 0, {enableTransition:true});
     }
     if (keyMap.KeyA === true) {
-      camera_controls.truck(-moveSpeed, 0, true);
+      camera_controls.truck(-moveSpeed, 0, {enableTransition:true});
     }
     if (keyMap.KeyW === true) {
-      const curPos = camera_controls.getPosition();
-      const newTar = camera_controls.getTarget();
-      const newDiff = newTar
-        .sub(curPos)
-        .normalize()
-        .multiplyScalar(curPos.length());
-      camera_controls.setTarget(
-        curPos.x + newDiff.x,
-        curPos.y + newDiff.y,
-        curPos.z + newDiff.z,
-      );
-      camera_controls.dolly(moveSpeed, true);
+      translateForward(moveSpeed);
     }
     if (keyMap.KeyS === true) {
-      camera_controls.dolly(-moveSpeed, true);
+      translateForward(-moveSpeed);
     }
     if (keyMap.KeyQ === true) {
-      camera_controls.truck(0, moveSpeed, true);
+      camera_controls.truck(0, moveSpeed, {enableTransition:true});
     }
     if (keyMap.KeyE === true) {
-      camera_controls.truck(0, -moveSpeed, true);
+      camera_controls.truck(0, -moveSpeed, {enableTransition:true});
     }
   }
 
@@ -162,7 +174,7 @@ export function get_scene_tree() {
       return;
     }
     if (keyMap.Space === true) {
-      camera_controls.setLookAt(0.7, -0.7, 0.3, 0, 0, 0);
+      camera_controls.setLookAt(0.7, -0.7, 0.3, 0, 0, 0, {enableTransition:true});
     }
     translate();
     rotate();
@@ -302,6 +314,7 @@ export function get_scene_tree() {
       curPos.x + newDiff.x,
       curPos.y + newDiff.y,
       curPos.z + newDiff.z,
+      {enableTransition:true}
     );
   };
 

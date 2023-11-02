@@ -1,4 +1,4 @@
-# Copyright 2022 The Nerfstudio Team. All rights reserved.
+# Copyright 2022 the Regents of the University of California, Nerfstudio Team and contributors. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -23,8 +23,8 @@ from typing import Any, Dict, List, Tuple, Type
 
 import torch
 from torch.nn import Parameter
-from torchmetrics import PeakSignalNoiseRatio
 from torchmetrics.functional import structural_similarity_index_measure
+from torchmetrics.image import PeakSignalNoiseRatio
 from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
 
 from nerfstudio.cameras.rays import RayBundle
@@ -66,6 +66,8 @@ class NeRFModel(Model):
     Args:
         config: Basic NeRF configuration to instantiate model
     """
+
+    config: VanillaModelConfig
 
     def __init__(
         self,
@@ -135,14 +137,17 @@ class NeRFModel(Model):
         return param_groups
 
     def get_outputs(self, ray_bundle: RayBundle):
-
         if self.field_coarse is None or self.field_fine is None:
             raise ValueError("populate_fields() must be called before get_outputs")
 
         # uniform sampling
         ray_samples_uniform = self.sampler_uniform(ray_bundle)
         if self.temporal_distortion is not None:
-            offsets = self.temporal_distortion(ray_samples_uniform.frustums.get_positions(), ray_samples_uniform.times)
+            offsets = None
+            if ray_samples_uniform.times is not None:
+                offsets = self.temporal_distortion(
+                    ray_samples_uniform.frustums.get_positions(), ray_samples_uniform.times
+                )
             ray_samples_uniform.frustums.set_offsets(offsets)
 
         # coarse field:
@@ -158,7 +163,9 @@ class NeRFModel(Model):
         # pdf sampling
         ray_samples_pdf = self.sampler_pdf(ray_bundle, ray_samples_uniform, weights_coarse)
         if self.temporal_distortion is not None:
-            offsets = self.temporal_distortion(ray_samples_pdf.frustums.get_positions(), ray_samples_pdf.times)
+            offsets = None
+            if ray_samples_pdf.times is not None:
+                offsets = self.temporal_distortion(ray_samples_pdf.frustums.get_positions(), ray_samples_pdf.times)
             ray_samples_pdf.frustums.set_offsets(offsets)
 
         # fine field:
@@ -185,9 +192,19 @@ class NeRFModel(Model):
         # Scaling metrics by coefficients to create the losses.
         device = outputs["rgb_coarse"].device
         image = batch["image"].to(device)
+        coarse_pred, coarse_image = self.renderer_rgb.blend_background_for_loss_computation(
+            pred_image=outputs["rgb_coarse"],
+            pred_accumulation=outputs["accumulation_coarse"],
+            gt_image=image,
+        )
+        fine_pred, fine_image = self.renderer_rgb.blend_background_for_loss_computation(
+            pred_image=outputs["rgb_fine"],
+            pred_accumulation=outputs["accumulation_fine"],
+            gt_image=image,
+        )
 
-        rgb_loss_coarse = self.rgb_loss(image, outputs["rgb_coarse"])
-        rgb_loss_fine = self.rgb_loss(image, outputs["rgb_fine"])
+        rgb_loss_coarse = self.rgb_loss(coarse_image, coarse_pred)
+        rgb_loss_fine = self.rgb_loss(fine_image, fine_pred)
 
         loss_dict = {"rgb_loss_coarse": rgb_loss_coarse, "rgb_loss_fine": rgb_loss_fine}
         loss_dict = misc.scale_dict(loss_dict, self.config.loss_coefficients)
@@ -197,6 +214,7 @@ class NeRFModel(Model):
         self, outputs: Dict[str, torch.Tensor], batch: Dict[str, torch.Tensor]
     ) -> Tuple[Dict[str, float], Dict[str, torch.Tensor]]:
         image = batch["image"].to(outputs["rgb_coarse"].device)
+        image = self.renderer_rgb.blend_background(image)
         rgb_coarse = outputs["rgb_coarse"]
         rgb_fine = outputs["rgb_fine"]
         acc_coarse = colormaps.apply_colormap(outputs["accumulation_coarse"])
@@ -228,6 +246,7 @@ class NeRFModel(Model):
         fine_psnr = self.psnr(image, rgb_fine)
         fine_ssim = self.ssim(image, rgb_fine)
         fine_lpips = self.lpips(image, rgb_fine)
+        assert isinstance(fine_ssim, torch.Tensor)
 
         metrics_dict = {
             "psnr": float(fine_psnr.item()),
